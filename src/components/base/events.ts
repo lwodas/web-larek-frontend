@@ -60,7 +60,7 @@ export class EventEmitter implements IEvents {
                 subscribers.forEach(callback => callback(data));
             }
         });
-    }
+    }    
 
     /**
      * Слушать все события
