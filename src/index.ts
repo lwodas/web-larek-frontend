@@ -3,21 +3,21 @@ import './scss/styles.scss';
 import { CDN_URL, API_URL } from './utils/constants';
 import { EventEmitter } from './components/base/events';
 import { ensureElement } from './utils/utils';
-import { IItem, IOrderDetails } from './types';
+import { IItem, IOrderBatch, IOrderDetails } from './types';
 
 import { DataModel } from './components/models/data';
 import { ApiModel } from './components/models/api';
 import { BasketModel } from './components/models/basket';
 import { FormModel } from './components/models/form';
 
-import { CardInterface } from './components/interface/card';
-import { CardPreviewInterface } from './components/interface/cardPreview';
-import { ModalInterface } from './components/interface/modal';
-import { BasketInterface } from './components/interface/basket';
-import { BasketItemInterface } from './components/interface/basketItem';
-import { FormInterface } from './components/interface/formBasket';
-import { FormContactsInterface } from './components/interface/contacts';
-import { SuccessInterface } from './components/interface/success';
+import { CardInterface } from './components/views/card';
+import { CardPreviewInterface } from './components/views/cardPreview';
+import { ModalInterface } from './components/views/modal';
+import { BasketInterface } from './components/views/basket';
+import { BasketItemInterface } from './components/views/basketItem';
+import { FormInterface } from './components/views/formBasket';
+import { FormContactsInterface } from './components/views/contacts';
+import { SuccessInterface } from './components/views/success';
 
 const CardCatalogTE = document.querySelector('#card-catalog') as HTMLTemplateElement;
 const CardPreviewTE = document.querySelector('#card-preview') as HTMLTemplateElement;
@@ -39,19 +39,18 @@ const formContactsInterface = new FormContactsInterface(ContactsTE, eventEmitter
 
 eventEmitter.on('productCards:receive', () => {
   dataModel.productList.forEach(item => {
-    const card = new CardInterface(CardCatalogTE, eventEmitter, { onClick: () => eventEmitter.emit('card:select', item) });
-    const renderedCard = card.render(item);
-    ensureElement<HTMLElement>('.gallery').append(renderedCard);
+    const card = new CardInterface(CardCatalogTE, eventEmitter, {
+      onClick: () => eventEmitter.emit('card:select', item)
+    });
+    ensureElement<HTMLElement>('.gallery').append(card.render(item));
   });
 });
 
-eventEmitter.on('card:select', (item: IItem) => { 
-  dataModel.previewProduct(item) 
-});
+eventEmitter.on('card:select', (item: IItem) => dataModel.previewProduct(item));
 
 eventEmitter.on('modalCard:open', (item: IItem) => {
-  const Preview = new CardPreviewInterface(CardPreviewTE, eventEmitter)
-  modalInterface.content = Preview.render(item);
+  const preview = new CardPreviewInterface(CardPreviewTE, eventEmitter);
+  modalInterface.content = preview.render(item);
   modalInterface.render();
 });
 
@@ -62,78 +61,82 @@ eventEmitter.on('card:addBasket', () => {
 });
 
 eventEmitter.on('basket:open', () => {
-  basketInterface.updateTotalPrice(basketModel.getTotalPrice());
-  let i = 0;
-  basketInterface.basketItems = basketModel.productsInBasket.map((item) => {
-    const basketItem = new BasketItemInterface(CardBasketTE, eventEmitter, { onClick: () => eventEmitter.emit('basket:basketItemRemove', item) });
-    i = i + 1;
-    return basketItem.render(item, i);
-  })
-  modalInterface.content = basketInterface.render();
-  modalInterface.render();
+  renderBasket();
 });
 
 eventEmitter.on('basket:basketItemRemove', (item: IItem) => {
   basketModel.removeProductFromBasket(item);
-  basketInterface.updateTotalPrice(basketModel.getTotalPrice());
   basketInterface.updateHeaderCartCounter(basketModel.getProductCount());
-  let i = 0;
-  basketInterface.basketItems = basketModel.productsInBasket.map((item) => {
-    const basketItem = new BasketItemInterface(CardBasketTE, eventEmitter, { onClick: () => eventEmitter.emit('basket:basketItemRemove', item) });
-    i = i + 1;
-    return basketItem.render(item, i);
-  })
+  renderBasket();
 });
+
+function renderBasket(): void {
+  basketInterface.updateTotalPrice(basketModel.getTotalPrice());
+  let i = 0;
+  basketInterface.basketItems = basketModel.productsInBasket.map((product) => {
+    const basketItem = new BasketItemInterface(CardBasketTE, eventEmitter, {
+      onClick: () => eventEmitter.emit('basket:basketItemRemove', product)
+    });
+    return basketItem.render(product, ++i);
+  });
+  modalInterface.content = basketInterface.render();
+  modalInterface.render();
+}
 
 eventEmitter.on('order:open', () => {
   modalInterface.content = formInterface.render();
   modalInterface.render();
-  formModel.items = basketModel.productsInBasket.map(item => item.id);
 });
 
 eventEmitter.on('order:paymentSelection', (button: HTMLButtonElement) => {
   formModel.paymentMethod = button.name;
   formModel.validateAddress();
-})
+});
 
-eventEmitter.on(`order:changeAddress`, (data: { field: string, value: string }) => {
+eventEmitter.on('order:changeAddress', (data: { field: string; value: string }) => {
   formModel.setAddress(data.field, data.value);
 });
 
 eventEmitter.on('formErrors:address', (errors: Partial<IOrderDetails>) => {
   const { address, payment } = errors;
   formInterface.valid = !address && !payment;
-  formInterface.errorContainer.textContent = Object.values({address, payment}).filter(i => !!i).join('; ');
-})
+  formInterface.errorContainer.textContent = Object.values({ address, payment })
+    .filter(Boolean)
+    .join('; ');
+});
 
 eventEmitter.on('contacts:open', () => {
-  formModel.total = basketModel.getTotalPrice();
   modalInterface.content = formContactsInterface.render();
   modalInterface.render();
 });
 
-eventEmitter.on(`contacts:changeInput`, (data: { field: string, value: string }) => {
+eventEmitter.on('contacts:changeInput', (data: { field: string; value: string }) => {
   formModel.setContactInfo(data.field, data.value);
 });
 
 eventEmitter.on('formErrors:change', (errors: Partial<IOrderDetails>) => {
   const { email, phone } = errors;
   formContactsInterface.valid = !email && !phone;
-  formContactsInterface.formErrors.textContent = Object.values({phone, email}).filter(i => !!i).join('; ');
-})
+  formContactsInterface.formErrors.textContent = Object.values({ phone, email })
+    .filter(Boolean)
+    .join('; ');
+});
 
 eventEmitter.on('success:open', () => {
-  //console.log(formModel.getOrderData());
-  apiModel.submitOrder(formModel.getOrderData())
-    .then((data) => {
-      console.log(data);
+  const items = basketModel.productsInBasket.map((item) => item.id);
+  const total = basketModel.getTotalPrice();
+  const orderData: IOrderBatch = formModel.getOrderData(items, total);
+
+  apiModel
+    .submitOrder(orderData)
+    .then(() => {
       const success = new SuccessInterface(SuccessTE, eventEmitter);
-      modalInterface.content = success.render(basketModel.getTotalPrice());
+      modalInterface.content = success.render(total);
       basketModel.clearBasket();
       basketInterface.updateHeaderCartCounter(basketModel.getProductCount());
       modalInterface.render();
     })
-    .catch(error => console.log(error));
+    .catch(console.log);
 });
 
 eventEmitter.on('success:close', () => modalInterface.close());
@@ -146,11 +149,10 @@ eventEmitter.on('modal:close', () => {
   modalInterface.isLocked = false;
 });
 
-apiModel.fetchProductList()
-  .then(function (data: IItem[]) {
-    //console.log('Полученные данные:', data);
+apiModel
+  .fetchProductList()
+  .then((data: IItem[]) => {
     dataModel.productList = data;
     eventEmitter.emit('productCards:receive');
   })
-  .catch(error => console.log(error))
-
+  .catch(console.log);
